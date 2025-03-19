@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard de Monitorización (Client-Only)</title>
+  <!-- TailwindCSS CDN -->
+</head>
+<body class="bg-gray-50 min-h-screen">
+  <div class="container mx-auto py-8 px-4">
+    <h1 class="text-3xl font-bold text-center mb-2">Dashboard de Monitorización</h1>
+
+    <!-- Contador de próxima petición -->
+    <div id="countdown-wrapper" class="text-center mb-8">
+      <p class="text-gray-700">
+        Próximo chequeo en
+        <span id="countdown" class="font-bold">30</span>
+        segundos
+      </p>
+    </div>
+
+    <!-- Contenedor para las tarjetas -->
+    <div id="grid" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6">
+      <!-- Se rellenará dinámicamente con JavaScript -->
+    </div>
+  </div>
+
+  <script>
+    // -------------------------------------------
+    // 1) Configuración
+    // -------------------------------------------
+    // Lista de endpoints a monitorizar:
+    //   url -> donde se hace el health check
+    //   name -> nombre descriptivo
+    const ENDPOINTS = [
+      {
+        url: "https://staging.amadeusmagister.com/api/health",
+        name: "Staging"
+      },
+      {
+        url: "https://conservatory.amadeusmagister.com/api/health",
+        name: "Conservatory"
+      },
+      // Agrega más si lo deseas...
+    ];
+
+    // Intervalo de chequeo (segundos)
+    const FETCH_INTERVAL_SEC = 30;
+
+    // Cantidad máxima de resultados en el historial
+    const MAX_HISTORY = 10;
+
+    // Estructura en memoria para guardar historial:
+    //   { "url": { history: [...], lastStatus: {...} } }
+    const endpointsData = {};
+
+    ENDPOINTS.forEach(ep => {
+      endpointsData[ep.url] = {
+        ...ep,           // incluir url y name
+        history: [],     // array de resultados
+        lastStatus: undefined
+      };
+    });
+
+    // Para el contador de la UI
+    let nextCheck = FETCH_INTERVAL_SEC;
+
+    // -------------------------------------------
+    // 2) Lógica de chequeo
+    // -------------------------------------------
+    async function checkAllEndpoints() {
+      // Para cada endpoint, hacemos fetch
+      for (const ep of ENDPOINTS) {
+        const { url } = ep;
+        try {
+          const response = await fetch(url);
+          const success = response.ok;
+          const statusObj = {
+            timestamp: Date.now(),
+            success,
+            statusCode: response.status
+          };
+          updateEndpointStatus(url, statusObj);
+        } catch (error) {
+          // Error de red
+          const statusObj = {
+            timestamp: Date.now(),
+            success: false
+          };
+          updateEndpointStatus(url, statusObj);
+        }
+      }
+      // Después de actualizar, renderizamos la UI
+      render();
+    }
+
+    function updateEndpointStatus(url, newStatus) {
+      const endpoint = endpointsData[url];
+      endpoint.history.unshift(newStatus);
+      if (endpoint.history.length > MAX_HISTORY) {
+        endpoint.history.pop(); // elimina el más viejo
+      }
+      endpoint.lastStatus = newStatus;
+    }
+
+    // -------------------------------------------
+    // 3) Render de la UI
+    // -------------------------------------------
+    function render() {
+      const grid = document.getElementById('grid');
+      grid.innerHTML = ''; // limpiar
+
+      Object.values(endpointsData).forEach(item => {
+        const { url, name, lastStatus, history } = item;
+        const isOk = lastStatus?.success;
+        const currentStatus = isOk ? 'OK' : 'FAIL';
+        const httpCode = lastStatus?.statusCode || '--';
+
+        const cardBg      = isOk ? 'bg-green-50' : 'bg-red-50';
+        const textColor   = isOk ? 'text-green-700' : 'text-red-700';
+        const borderColor = isOk ? 'border-green-200' : 'border-red-200';
+
+        // Quitar /api/health, etc. para enlazar a la raíz
+        const appUrl = url.replace('/api/health', '');
+
+        // Última hora de petición
+        const lastTime = lastStatus
+          ? new Date(lastStatus.timestamp).toLocaleTimeString()
+          : '--:--:--';
+
+        // Generamos círculos para el historial
+        const historyHtml = history.map(h => {
+          const colorClass = h.success ? 'bg-green-500' : 'bg-red-500';
+          return `
+            <span class="inline-block w-3 h-3 rounded-full ${colorClass}"></span>
+          `;
+        }).join('<span class="mx-0.5"></span>');
+
+        // Crear el contenedor de la tarjeta
+        const card = document.createElement('div');
+        card.className = `p-4 rounded-md shadow ${cardBg} border ${borderColor} flex flex-col justify-between`;
+
+        card.innerHTML = `
+          <div>
+            <h2 class="text-lg font-bold text-gray-700 mb-2">
+              <a
+                href="${appUrl}"
+                target="_blank"
+                rel="noopener noreferrer"
+                class="underline text-blue-600 hover:text-blue-800 break-words"
+              >
+                ${name}
+              </a>
+            </h2>
+            <p class="font-medium ${textColor}">
+              Estado actual: ${currentStatus} (HTTP ${httpCode})
+            </p>
+          </div>
+          <div>
+            <p class="text-sm mt-2 text-gray-600">
+              Última petición: ${lastTime}
+            </p>
+            <h3 class="mt-4 text-gray-600 font-semibold">Historial (10 últimos):</h3>
+            <div class="flex space-x-1 mt-1">
+              ${historyHtml}
+            </div>
+          </div>
+        `;
+        grid.appendChild(card);
+      });
+    }
+
+    // -------------------------------------------
+    // 4) Inicialización y setInterval
+    // -------------------------------------------
+    // Primera llamada al arrancar (para no esperar 30s)
+    checkAllEndpoints();
+
+    // Cada 30s, volvemos a chequear
+    setInterval(() => {
+      checkAllEndpoints();
+      nextCheck = FETCH_INTERVAL_SEC; // reinicia el contador
+    }, FETCH_INTERVAL_SEC * 1000);
+
+    // Actualiza el contador en la UI cada segundo
+    setInterval(() => {
+      nextCheck--;
+      if (nextCheck < 0) nextCheck = 0;
+      document.getElementById('countdown').textContent = nextCheck;
+    }, 1000);
+  </script>
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+</body>
+</html>
