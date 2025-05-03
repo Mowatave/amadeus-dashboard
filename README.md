@@ -13,12 +13,8 @@ Edita el archivo `index.html` y modifica la lista `ENDPOINTS`, por ejemplo:
 ```js
 const ENDPOINTS = [
       {
-        url: "https://staging.amadeusmagister.com/api/health",
+        url: "https://staging.amadeusmagister.com/api/v1/health",
         name: "Staging"
-      },
-      {
-        url: "https://conservatory.amadeusmagister.com/api/health",
-        name: "Conservatory"
       },
       // Agrega más si lo deseas...
     ];
